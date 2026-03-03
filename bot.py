@@ -3,103 +3,87 @@ import time
 from datetime import datetime
 import telebot
 import os
-from twelvedata import TDClient
+import requests
 
-# ================== CONFIG (ajoute sur Railway Variables) ==================
+# ================== CONFIG (sur Railway Variables) ==================
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-TWELVE_API_KEY = os.getenv("TWELVE_API_KEY")          # ← TA CLÉ API ICI !
+OILPRICE_API_KEY = os.getenv("OILPRICE_API_KEY")          # ← TA CLÉ OILPRICEAPI ICI !
 SENTIMENT_BIAS = os.getenv("SENTIMENT_BIAS", "bullish")
 
-SYMBOL = "WTI/USD"   # Crude Oil WTI Spot / USD sur Twelve Data
-INTERVAL = "15min"   # ou "5min", "1h", etc.
+BASE_URL = "https://api.oilpriceapi.com/v1"
+COMMODITY_CODE = "WTI_USD"   # WTI Crude Oil en USD (change en BRENT_CRUDE_USD si tu veux Brent)
 
-print("🚀 Bot OIL WTI (Twelve Data) démarré - Sentiment :", SENTIMENT_BIAS.upper())
-print("API Key présent :", "OUI" if TWELVE_API_KEY else "NON ❌")
+print("🚀 Bot OIL WTI (OilPriceAPI) démarré - Sentiment :", SENTIMENT_BIAS.upper())
+print("API Key présent :", "OUI" if OILPRICE_API_KEY else "NON ❌")
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
-# Client Twelve Data
-td = TDClient(apikey=TWELVE_API_KEY)
-
 last_signal = None
 last_bar_time = None
+last_price_alert = None
 
-def send_signal(message):
+def send_message(message):
     try:
-        bot.send_message(CHAT_ID, f"🚨 SIGNAL OIL WTI (Twelve Data)\n{message}\n🕒 {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-        print(f"✅ Signal envoyé : {message}")
+        bot.send_message(CHAT_ID, message)
+        print(f"✅ Message envoyé : {message[:80]}...")
     except Exception as e:
         print(f"❌ Erreur Telegram : {e}")
 
-def get_data():
-    """Récupère les données time series avec retry"""
+def send_price_alert(price, timestamp):
+    global last_price_alert
+    if last_price_alert == price:
+        return
+    last_price_alert = price
+    
+    msg = (
+        f"📊 Prix actuel OIL WTI : **{price:.2f} USD / baril**\n"
+        f"🕒 {timestamp.strftime('%Y-%m-%d %H:%M UTC')}\n"
+        f"Sentiment actuel : {SENTIMENT_BIAS.upper()}"
+    )
+    send_message(msg)
+
+def get_latest_price():
+    """Récupère le prix actuel via OilPriceAPI avec retry"""
+    url = f"{BASE_URL}/prices/latest?by_code={COMMODITY_CODE}"
+    headers = {
+        "Authorization": f"Token {OILPRICE_API_KEY}"
+    }
+    
     for attempt in range(3):
         try:
-            ts = td.time_series(
-                symbol=SYMBOL,
-                interval=INTERVAL,
-                outputsize=100,          # assez pour SMA 50 + marge
-                timezone="UTC"
-            )
-            df = ts.as_pandas()      # retourne directement un DataFrame pandas
-            if not df.empty:
-                print(f"✅ Données Twelve Data récupérées ({len(df)} lignes) - Dernier prix : {df['close'].iloc[-1]:.2f}")
-                return df
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            
+            if data.get("status") == "success" and "data" in data and COMMODITY_CODE in data["data"]:
+                price_data = data["data"][COMMODITY_CODE]
+                price = price_data.get("price")
+                timestamp_str = price_data.get("timestamp")
+                if price is not None:
+                    timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00')) if timestamp_str else datetime.utcnow()
+                    print(f"✅ Prix récupéré : {price:.2f} USD à {timestamp}")
+                    return price, timestamp
+            else:
+                print(f"Réponse inattendue : {data}")
         except Exception as e:
             print(f"Tentative {attempt+1}/3 échouée : {str(e)[:100]}")
             time.sleep(10)
-    print("❌ Impossible de récupérer les données après 3 essais")
-    return None
+    
+    print("❌ Échec récupération prix après 3 essais")
+    return None, None
 
-def calculate_signals(df):
-    global last_signal, last_bar_time
-    if df is None or df.empty:
-        return
-    
-    # Colonnes Twelve Data : open, high, low, close, volume
-    df['sma_fast'] = df['close'].rolling(20).mean()
-    df['sma_slow'] = df['close'].rolling(50).mean()
-    
-    delta = df['close'].diff()
-    gain = delta.where(delta > 0, 0).rolling(14).mean()
-    loss = abs(delta.where(delta < 0, 0)).rolling(14).mean()
-    rs = gain / loss
-    df['rsi'] = 100 - (100 / (1 + rs))
-    
-    current_time = df.index[-1]
-    if last_bar_time is not None and current_time == last_bar_time:
-        return
-    last_bar_time = current_time
-    
-    price = df['close'].iloc[-1]
-    sma_f = df['sma_fast'].iloc[-1]
-    sma_s = df['sma_slow'].iloc[-1]
-    rsi = df['rsi'].iloc[-1]
-    
-    if pd.isna(sma_f) or pd.isna(sma_s) or pd.isna(rsi):
-        return
-    
-    signal = None
-    bias = SENTIMENT_BIAS.lower()
-    
-    if sma_f > sma_s and rsi > 50 and last_signal != "BUY":
-        signal = f"🟢 **ACHAT FORT** OIL WTI\nPrix : {price:.2f}\nSMA20 > SMA50 + RSI {rsi:.1f} + {bias.upper()}"
-        last_signal = "BUY"
-    elif sma_f < sma_s and rsi < 50 and last_signal != "SELL":
-        signal = f"🔴 **VENTE** OIL WTI\nPrix : {price:.2f}\nSMA20 < SMA50 + RSI {rsi:.1f}"
-        last_signal = "SELL"
-    elif bias == "bullish" and sma_f > sma_s and last_signal != "BUY":
-        signal = f"🟢 **ACHAT FORCÉ (Géopolitique)** OIL WTI\nPrix : {price:.2f}\nSentiment X très haussier !"
-        last_signal = "BUY"
-    
-    if signal:
-        send_signal(signal)
-
+# Boucle principale (toutes les 15 min)
 while True:
     try:
-        df = get_data()
-        calculate_signals(df)
+        price, timestamp = get_latest_price()
+        if price is not None:
+            send_price_alert(price, timestamp)
+            
+            # Ici tu peux ajouter la logique SMA/RSI si tu veux (mais il faut des données historiques)
+            # OilPriceAPI a /v1/prices/historical pour ça, mais pour l'instant on garde simple
+            # Si tu veux full stratégie, dis-moi et on ajoute historical + pandas rolling
     except Exception as e:
         print("Erreur boucle :", e)
-    time.sleep(60)  # Vérifie toutes les minutes
+    
+    time.sleep(900)  # 15 minutes
