@@ -12,7 +12,7 @@ OILPRICE_API_KEY = os.getenv("OILPRICE_API_KEY")
 SENTIMENT_BIAS = os.getenv("SENTIMENT_BIAS", "bullish")
 
 BASE_URL = "https://api.oilpriceapi.com/v1"
-COMMODITY_CODE = "WTI_USD"  # WTI spot
+COMMODITY_CODE = "WTI_USD"
 
 print("🚀 Bot démarré - Sentiment :", SENTIMENT_BIAS.upper())
 print("Clé API :", "présente" if OILPRICE_API_KEY else "MANQUANTE ❌")
@@ -34,7 +34,7 @@ def send_price_alert(price, timestamp):
         return
     last_price_alert = price
     
-    msg = f"📊 Prix OIL WTI : **{price:.2f} USD**\n🕒 {timestamp.strftime('%Y-%m-%d %H:%M UTC')}\nSentiment : {SENTIMENT_BIAS.upper()}"
+    msg = f"📊 Prix OIL WTI : **{price:.2f} USD / baril**\n🕒 {timestamp.strftime('%Y-%m-%d %H:%M UTC')}\nSentiment : {SENTIMENT_BIAS.upper()}"
     send_message(msg)
 
 def get_latest_price():
@@ -45,43 +45,47 @@ def get_latest_price():
         'Content-Type': 'application/json'
     }
     
-    for attempt in range(4):  # +1 tentative
+    for attempt in range(4):
         try:
-            print(f"Tentative {attempt+1}/4 - URL: {url} ?by_code={COMMODITY_CODE}")
+            print(f"Tentative {attempt+1}/4 - Appel à {url} avec by_code={COMMODITY_CODE}")
             response = requests.get(url, headers=headers, params=params, timeout=15)
             print(f"Status code: {response.status_code}")
             
-            if response.status_code == 200:
-                data = response.json()
-                print(f"Réponse brute: {data}")
-                
-                if data.get("status") == "success" and "data" in data:
-                    price_data = data["data"].get(COMMODITY_CODE)
-                    if price_data and "price" in price_data:
-                        price = price_data["price"]
-                        ts_str = price_data.get("created_at") or price_data.get("timestamp")
-                        timestamp = datetime.fromisoformat(ts_str.replace('Z', '+00:00')) if ts_str else datetime.utcnow()
-                        return price, timestamp
-                else:
-                    print("Format inattendu dans success")
-            else:
+            if response.status_code != 200:
                 print(f"Erreur HTTP {response.status_code}: {response.text[:200]}")
+                continue
+            
+            data = response.json()
+            print(f"Réponse brute: {data}")
+            
+            if data.get("status") == "success" and "data" in data:
+                price_data = data["data"]
+                # Structure directe : data = {price, formatted, ...} (pas de sous-clé WTI_USD)
+                price = price_data.get("price")
+                if price is not None:
+                    ts_str = price_data.get("created_at") or price_data.get("timestamp") or price_data.get("updated_at")
+                    timestamp = datetime.fromisoformat(ts_str.replace('Z', '+00:00')) if ts_str else datetime.utcnow()
+                    print(f"✅ Prix extrait : {price:.2f} USD")
+                    return price, timestamp
+                else:
+                    print("Pas de 'price' dans data")
+            else:
+                print("Pas de 'status: success' ou pas de 'data'")
                 
-        except requests.exceptions.RequestException as e:
-            print(f"Exception réseau/tentative {attempt+1}: {e}")
+        except Exception as e:
+            print(f"Exception tentative {attempt+1}: {e}")
         
-        time.sleep(2 ** attempt)  # Backoff : 1s → 2s → 4s → 8s
+        time.sleep(2 ** attempt)
     
     print("❌ Échec total après 4 tentatives")
     return None, None
 
-# Boucle
 while True:
     try:
         price, timestamp = get_latest_price()
         if price is not None:
             send_price_alert(price, timestamp)
     except Exception as e:
-        print(f"Erreur globale boucle: {e}")
+        print(f"Erreur boucle: {e}")
     
-    time.sleep(900)  # 15 min
+    time.sleep(900)  # 15 minutes
