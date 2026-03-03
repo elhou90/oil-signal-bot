@@ -11,7 +11,7 @@ CHAT_ID = os.getenv("CHAT_ID")
 TWELVE_API_KEY = os.getenv("TWELVE_API_KEY")          # ← TA CLÉ API ICI !
 SENTIMENT_BIAS = os.getenv("SENTIMENT_BIAS", "bullish")
 
-SYMBOL = "WTI"   # Crude Oil WTI Spot / USD sur Twelve Data
+SYMBOL = "WTI/USD"   # Crude Oil WTI Spot / USD sur Twelve Data
 INTERVAL = "15min"   # ou "5min", "1h", etc.
 
 print("🚀 Bot OIL WTI (Twelve Data) démarré - Sentiment :", SENTIMENT_BIAS.upper())
