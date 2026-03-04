@@ -1,5 +1,5 @@
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import telebot
 import os
 import requests
@@ -8,16 +8,14 @@ import requests
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 OILPRICE_API_KEY = os.getenv("OILPRICE_API_KEY")
-NEWS_API_KEY = os.getenv("NEWS_API_KEY")                    # ← NOUVELLE CLÉ !
-SENTIMENT_BIAS = os.getenv("SENTIMENT_BIAS", "bullish")    # Je te dis chaque jour quoi mettre
+NEWS_API_KEY = os.getenv("NEWS_API_KEY")
+SENTIMENT_BIAS = os.getenv("SENTIMENT_BIAS", "bullish")
 
 COMMODITY_CODE = "WTI_USD"
 
-print("🚀 Bot WTI complet démarré - Sentiment Grok :", SENTIMENT_BIAS.upper())
+print("🚀 Bot WTI COMPLET démarré - Sentiment Grok :", SENTIMENT_BIAS.upper())
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
-
-last_price = None
 
 def send_message(message):
     try:
@@ -30,63 +28,68 @@ def get_price():
     url = "https://api.oilpriceapi.com/v1/prices/latest"
     params = {'by_code': COMMODITY_CODE}
     headers = {'Authorization': f'Token {OILPRICE_API_KEY}'}
-    
     try:
         r = requests.get(url, headers=headers, params=params, timeout=10)
         if r.status_code == 200:
             data = r.json()
             if data.get("status") == "success":
-                price = data["data"]["price"]
-                return price
+                return data["data"]["price"]
     except:
         pass
     return None
 
 def get_news():
-    url = f"https://newsapi.org/v2/everything"
+    yesterday = (datetime.utcnow() - timedelta(days=1)).strftime("%Y-%m-%d")
+    url = "https://newsapi.org/v2/everything"
     params = {
-        "q": "WTI OR 'crude oil' OR 'oil price' OR 'Strait of Hormuz' OR Hormuz OR 'Iran oil' OR 'oil installation' OR bombing OR attack",
+        "q": '(WTI OR "crude oil" OR "oil price" OR Hormuz OR "Strait of Hormuz" OR "Iran oil" OR "oil installation")',
         "language": "en",
-        "sortBy": "publishedAt",
-        "pageSize": 3,
+        "sortBy": "relevancy",
+        "pageSize": 5,
+        "from": yesterday,
         "apiKey": NEWS_API_KEY
     }
     try:
         r = requests.get(url, params=params, timeout=10)
         if r.status_code == 200:
-            articles = r.json()["articles"]
-            news_text = "📰 Dernières infos WTI / Géopolitique :\n\n"
-            for art in articles[:2]:
-                news_text += f"• {art['title']}\n   {art['url']}\n\n"
-            return news_text
+            articles = r.json().get("articles", [])
+            if not articles:
+                return "📰 Aucune info majeure sur WTI/Hormuz ces dernières 24h"
+            
+            news_text = "📰 Dernières infos WTI / Géopolitique (24h) :\n\n"
+            for art in articles[:3]:
+                if any(k in art['title'].lower() or art['description'].lower() for k in ['oil', 'wti', 'hormuz', 'iran']):
+                    news_text += f"• {art['title']}\n   {art['url']}\n\n"
+            return news_text.strip()
     except:
-        return "📰 Impossible de récupérer les news pour l'instant"
+        return "📰 Impossible de récupérer les news pour l’instant"
 
 def get_prediction():
-    bias = SENTIMENT_BIAS.lower()
-    if bias == "bullish":
+    if SENTIMENT_BIAS.lower() == "bullish":
         return "🔥 GROK PREDICTION : HAUSSE FORTE\n✅ RECOMMANDATION : ACHAT (Buy WTI)"
-    elif bias == "bearish":
+    elif SENTIMENT_BIAS.lower() == "bearish":
         return "📉 GROK PREDICTION : CHUTE\n❌ RECOMMANDATION : VENTE (Sell WTI)"
     else:
-        return "⚖️ GROK PREDICTION : NEUTRE\n🔄 Attendre confirmation"
+        return "⚖️ GROK PREDICTION : NEUTRE\n🔄 Attendre signal"
 
 while True:
     try:
+        # Prix
         price = get_price()
         if price:
-            price_msg = f"📊 Prix OIL WTI : **{price:.2f} USD / baril**\n🕒 {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
-            send_message(price_msg)
+            send_message(f"📊 Prix OIL WTI : **{price:.2f} USD / baril**\n🕒 {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}")
         
+        # News ciblées
         news = get_news()
         send_message(news)
         
+        # Prédiction Grok + recommandation
         pred = get_prediction()
         send_message(pred)
         
-        print(f"Cycle terminé - Prix : {price} - Sentiment : {SENTIMENT_BIAS}")
+        print("Cycle terminé")
         
     except Exception as e:
         print(f"Erreur : {e}")
     
-    time.sleep(900)  # 15 minutes
+    time.sleep(900)  # Toutes les 15 minutes
