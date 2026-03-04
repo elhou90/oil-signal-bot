@@ -1,5 +1,5 @@
 import time
-from datetime import datetime, timedelta   # ← CORRIGÉ ici !
+from datetime import datetime, timedelta, timezone   # ← CORRIGÉ
 import telebot
 import os
 import requests
@@ -40,7 +40,7 @@ def get_price():
     return None
 
 def get_news_newsapi():
-    yesterday = (datetime.utcnow() - timedelta(days=1)).strftime("%Y-%m-%d")
+    yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
     url = "https://newsapi.org/v2/everything"
     params = {
         "q": '(WTI OR "crude oil" OR "oil price" OR Hormuz OR "Strait of Hormuz" OR "Iran oil" OR "oil installation")',
@@ -105,7 +105,7 @@ while True:
     try:
         price = get_price()
         if price:
-            send_message(f"📊 Prix OIL WTI : **{price:.2f} USD / baril**\n🕒 {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}")
+            send_message(f"📊 Prix OIL WTI : **{price:.2f} USD / baril**\n🕒 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
 
         news1 = get_news_newsapi()
         news2 = get_news_newsdata()
