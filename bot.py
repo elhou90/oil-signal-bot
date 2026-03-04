@@ -1,5 +1,5 @@
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 import telebot
 import os
 import requests
@@ -8,12 +8,13 @@ import requests
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 OILPRICE_API_KEY = os.getenv("OILPRICE_API_KEY")
-NEWS_API_KEY = os.getenv("NEWS_API_KEY")
+NEWS_API_KEY = os.getenv("NEWS_API_KEY")           # ← ANCIENNE CLÉ NEWSAPI.ORG
+NEWSDATA_API_KEY = os.getenv("NEWSDATA_API_KEY")   # ← NOUVELLE CLÉ NEWS DATA.IO
 SENTIMENT_BIAS = os.getenv("SENTIMENT_BIAS", "bullish")
 
 COMMODITY_CODE = "WTI_USD"
 
-print("🚀 Bot WTI COMPLET démarré - Sentiment Grok :", SENTIMENT_BIAS.upper())
+print("🚀 Bot WTI + DEUX sources news démarré - Sentiment Grok :", SENTIMENT_BIAS.upper())
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
@@ -38,7 +39,7 @@ def get_price():
         pass
     return None
 
-def get_news():
+def get_news_newsapi():  # Ancienne source (NewsAPI.org)
     yesterday = (datetime.utcnow() - timedelta(days=1)).strftime("%Y-%m-%d")
     url = "https://newsapi.org/v2/everything"
     params = {
@@ -54,15 +55,43 @@ def get_news():
         if r.status_code == 200:
             articles = r.json().get("articles", [])
             if not articles:
-                return "📰 Aucune info majeure sur WTI/Hormuz ces dernières 24h"
-            
-            news_text = "📰 Dernières infos WTI / Géopolitique (24h) :\n\n"
-            for art in articles[:3]:
-                if any(k in art['title'].lower() or art['description'].lower() for k in ['oil', 'wti', 'hormuz', 'iran']):
-                    news_text += f"• {art['title']}\n   {art['url']}\n\n"
-            return news_text.strip()
+                return ""
+            text = "📰 NewsAPI.org :\n"
+            for art in articles[:2]:
+                text += f"• {art['title']}\n   {art['url']}\n\n"
+            return text
     except:
-        return "📰 Impossible de récupérer les news pour l’instant"
+        return ""
+
+def get_news_newsdata():  # Nouvelle source ajoutée (NewsData.io)
+    url = "https://newsdata.io/api/1/market"
+    params = {
+        "apikey": NEWSDATA_API_KEY,
+        "q": "WTI, oil, hormoz, hormuz, iran oil, oil installation",
+        "language": "fr,en,ar",
+        "timezone": "africa/algiers",
+        "removeduplicate": "1",
+        "size": 10
+    }
+    try:
+        r = requests.get(url, params=params, timeout=15)
+        if r.status_code == 200:
+            results = r.json().get("results", [])
+            if not results:
+                return ""
+            text = "📰 NewsData.io :\n"
+            count = 0
+            for art in results:
+                title = art.get("title", "")
+                link = art.get("link", "")
+                if any(word in (title.lower()) for word in ["wti", "oil", "hormoz", "hormuz", "iran", "installation", "bombard", "attaque"]):
+                    text += f"• {title}\n   {link}\n\n"
+                    count += 1
+                    if count >= 3:
+                        break
+            return text
+    except:
+        return ""
 
 def get_prediction():
     if SENTIMENT_BIAS.lower() == "bullish":
@@ -78,18 +107,23 @@ while True:
         price = get_price()
         if price:
             send_message(f"📊 Prix OIL WTI : **{price:.2f} USD / baril**\n🕒 {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}")
-        
-        # News ciblées
-        news = get_news()
-        send_message(news)
-        
+
+        # News des DEUX sources
+        news1 = get_news_newsapi()
+        news2 = get_news_newsdata()
+        combined_news = "📰 Dernières infos WTI / Géopolitique :\n\n" + news1 + news2
+        if "Aucune" not in combined_news and len(combined_news) > 50:
+            send_message(combined_news)
+        else:
+            send_message("📰 Aucune info majeure sur WTI/Hormuz ces dernières heures")
+
         # Prédiction Grok + recommandation
         pred = get_prediction()
         send_message(pred)
-        
-        print("Cycle terminé")
-        
+
+        print("✅ Cycle terminé (prix + 2 sources news + prédiction)")
+
     except Exception as e:
         print(f"Erreur : {e}")
-    
+
     time.sleep(900)  # Toutes les 15 minutes
