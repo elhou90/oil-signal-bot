@@ -1,22 +1,26 @@
 import time
-from datetime import datetime, timedelta, timezone   # ← CORRIGÉ
+from datetime import datetime, timedelta, timezone
 import telebot
 import os
 import requests
+import feedparser   # ← NOUVEAU pour les RSS
 
-# ================== CONFIG (Railway Variables) ==================
+# ================== CONFIG ==================
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 OILPRICE_API_KEY = os.getenv("OILPRICE_API_KEY")
-NEWS_API_KEY = os.getenv("NEWS_API_KEY")
-NEWSDATA_API_KEY = os.getenv("NEWSDATA_API_KEY")
 SENTIMENT_BIAS = os.getenv("SENTIMENT_BIAS", "bullish")
 
 COMMODITY_CODE = "WTI_USD"
 
-print("🚀 Bot WTI + DEUX sources news démarré - Sentiment Grok :", SENTIMENT_BIAS.upper())
+print("🚀 Bot WTI + RSS (Investing + OilPrice) démarré - Sentiment Grok :", SENTIMENT_BIAS.upper())
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
+
+RSS_FEEDS = [
+    "https://oilprice.com/rss/main",                    # Meilleur pour géopolitique pétrole
+    "https://www.investing.com/rss/news_11.rss"         # Commodities / WTI
+]
 
 def send_message(message):
     try:
@@ -39,59 +43,21 @@ def get_price():
         pass
     return None
 
-def get_news_newsapi():
-    yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
-    url = "https://newsapi.org/v2/everything"
-    params = {
-        "q": '(WTI OR "crude oil" OR "oil price" OR Hormuz OR "Strait of Hormuz" OR "Iran oil" OR "oil installation")',
-        "language": "en",
-        "sortBy": "relevancy",
-        "pageSize": 5,
-        "from": yesterday,
-        "apiKey": NEWS_API_KEY
-    }
-    try:
-        r = requests.get(url, params=params, timeout=10)
-        if r.status_code == 200:
-            articles = r.json().get("articles", [])
-            if not articles:
-                return ""
-            text = "📰 NewsAPI.org :\n"
-            for art in articles[:2]:
-                text += f"• {art['title']}\n   {art['url']}\n\n"
-            return text
-    except:
-        return ""
-
-def get_news_newsdata():
-    url = "https://newsdata.io/api/1/market"
-    params = {
-        "apikey": NEWSDATA_API_KEY,
-        "q": "WTI, oil, hormoz, hormuz, iran oil, oil installation",
-        "language": "fr,en,ar",
-        "timezone": "africa/algiers",
-        "removeduplicate": "1",
-        "size": 10
-    }
-    try:
-        r = requests.get(url, params=params, timeout=15)
-        if r.status_code == 200:
-            results = r.json().get("results", [])
-            if not results:
-                return ""
-            text = "📰 NewsData.io :\n"
-            count = 0
-            for art in results:
-                title = art.get("title", "")
-                link = art.get("link", "")
-                if any(word in title.lower() for word in ["wti", "oil", "hormoz", "hormuz", "iran", "installation", "bombard", "attaque"]):
-                    text += f"• {title}\n   {link}\n\n"
-                    count += 1
-                    if count >= 3:
-                        break
-            return text
-    except:
-        return ""
+def get_rss_news():
+    news_text = "📰 Dernières news WTI / Oil (RSS) :\n\n"
+    count = 0
+    keywords = ["wti", "crude oil", "oil price", "hormuz", "hormoz", "iran", "installation", "bombard", "attaque", "tankers", "strike"]
+    
+    for feed_url in RSS_FEEDS:
+        feed = feedparser.parse(feed_url)
+        for entry in feed.entries[:6]:  # 6 articles max par flux
+            title = entry.title.lower()
+            if any(k in title for k in keywords):
+                news_text += f"• {entry.title}\n   {entry.link}\n\n"
+                count += 1
+                if count >= 5:  # max 5 news au total
+                    return news_text
+    return news_text if count > 0 else "📰 Aucune news majeure sur WTI/Hormuz pour l’instant"
 
 def get_prediction():
     if SENTIMENT_BIAS.lower() == "bullish":
@@ -103,24 +69,22 @@ def get_prediction():
 
 while True:
     try:
+        # Prix
         price = get_price()
         if price:
             send_message(f"📊 Prix OIL WTI : **{price:.2f} USD / baril**\n🕒 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
 
-        news1 = get_news_newsapi()
-        news2 = get_news_newsdata()
-        combined_news = "📰 Dernières infos WTI / Géopolitique :\n\n" + news1 + news2
-        if len(combined_news) > 60:
-            send_message(combined_news)
-        else:
-            send_message("📰 Aucune info majeure sur WTI/Hormuz ces dernières heures")
+        # News RSS (Investing + OilPrice)
+        news = get_rss_news()
+        send_message(news)
 
+        # Prédiction Grok
         pred = get_prediction()
         send_message(pred)
 
-        print("✅ Cycle terminé (prix + 2 sources news + prédiction)")
+        print("✅ Cycle terminé (prix + RSS news + prédiction)")
 
     except Exception as e:
         print(f"Erreur : {e}")
 
-    time.sleep(900)
+    time.sleep(900)  # Toutes les 15 minutes
