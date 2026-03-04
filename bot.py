@@ -1,5 +1,5 @@
 import time
-from datetime import datetime
+from datetime import datetime, timedelta   # ← CORRIGÉ ici !
 import telebot
 import os
 import requests
@@ -8,8 +8,8 @@ import requests
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 OILPRICE_API_KEY = os.getenv("OILPRICE_API_KEY")
-NEWS_API_KEY = os.getenv("NEWS_API_KEY")           # ← ANCIENNE CLÉ NEWSAPI.ORG
-NEWSDATA_API_KEY = os.getenv("NEWSDATA_API_KEY")   # ← NOUVELLE CLÉ NEWS DATA.IO
+NEWS_API_KEY = os.getenv("NEWS_API_KEY")
+NEWSDATA_API_KEY = os.getenv("NEWSDATA_API_KEY")
 SENTIMENT_BIAS = os.getenv("SENTIMENT_BIAS", "bullish")
 
 COMMODITY_CODE = "WTI_USD"
@@ -39,7 +39,7 @@ def get_price():
         pass
     return None
 
-def get_news_newsapi():  # Ancienne source (NewsAPI.org)
+def get_news_newsapi():
     yesterday = (datetime.utcnow() - timedelta(days=1)).strftime("%Y-%m-%d")
     url = "https://newsapi.org/v2/everything"
     params = {
@@ -63,7 +63,7 @@ def get_news_newsapi():  # Ancienne source (NewsAPI.org)
     except:
         return ""
 
-def get_news_newsdata():  # Nouvelle source ajoutée (NewsData.io)
+def get_news_newsdata():
     url = "https://newsdata.io/api/1/market"
     params = {
         "apikey": NEWSDATA_API_KEY,
@@ -84,7 +84,7 @@ def get_news_newsdata():  # Nouvelle source ajoutée (NewsData.io)
             for art in results:
                 title = art.get("title", "")
                 link = art.get("link", "")
-                if any(word in (title.lower()) for word in ["wti", "oil", "hormoz", "hormuz", "iran", "installation", "bombard", "attaque"]):
+                if any(word in title.lower() for word in ["wti", "oil", "hormoz", "hormuz", "iran", "installation", "bombard", "attaque"]):
                     text += f"• {title}\n   {link}\n\n"
                     count += 1
                     if count >= 3:
@@ -103,21 +103,18 @@ def get_prediction():
 
 while True:
     try:
-        # Prix
         price = get_price()
         if price:
             send_message(f"📊 Prix OIL WTI : **{price:.2f} USD / baril**\n🕒 {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}")
 
-        # News des DEUX sources
         news1 = get_news_newsapi()
         news2 = get_news_newsdata()
         combined_news = "📰 Dernières infos WTI / Géopolitique :\n\n" + news1 + news2
-        if "Aucune" not in combined_news and len(combined_news) > 50:
+        if len(combined_news) > 60:
             send_message(combined_news)
         else:
             send_message("📰 Aucune info majeure sur WTI/Hormuz ces dernières heures")
 
-        # Prédiction Grok + recommandation
         pred = get_prediction()
         send_message(pred)
 
@@ -126,4 +123,4 @@ while True:
     except Exception as e:
         print(f"Erreur : {e}")
 
-    time.sleep(900)  # Toutes les 15 minutes
+    time.sleep(900)
