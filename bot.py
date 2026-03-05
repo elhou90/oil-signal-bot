@@ -13,67 +13,50 @@ SENTIMENT_BIAS = os.getenv("SENTIMENT_BIAS", "bullish")
 
 COMMODITY_CODE = "WTI_USD"
 
-# TES NIVEAUX BUY LIMIT (modifie ici si tu veux)
+# 🔥 NIVEAUX ICT EXACTS (modifie ici si tu veux changer)
 BUY_LEVELS = {
-    76.20: {"sl": 75.60, "tp": 79.50, "lot": 0.02},
-    75.50: {"sl": 74.80, "tp": 79.50, "lot": 0.02},
+    76.20: {"sl": 75.50, "tp": 79.50, "lot": 0.02},
+    75.50: {"sl": 74.70, "tp": 79.50, "lot": 0.02},
     74.80: {"sl": 74.00, "tp": 79.50, "lot": 0.01},
     73.80: {"sl": 73.00, "tp": 79.50, "lot": 0.01}
 }
 
-print("🚀 Bot démarré - Debug prix activé")
+print("🚀 Bot WTI + ALERTES ICT démarré - Sentiment :", SENTIMENT_BIAS.upper())
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
-RSS_FEEDS = [
-    "https://oilprice.com/rss/main",
-    "https://www.investing.com/rss/news_11.rss"
-]
+RSS_FEEDS = ["https://oilprice.com/rss/main", "https://www.investing.com/rss/news_11.rss"]
 
 def send_message(message):
     try:
         bot.send_message(CHAT_ID, message)
+        print("✅ Message envoyé")
     except Exception as e:
         print(f"Erreur Telegram : {e}")
 
 def get_price():
-    """Version avec debug complet"""
     url = "https://api.oilpriceapi.com/v1/prices/latest"
     params = {'by_code': COMMODITY_CODE}
     headers = {'Authorization': f'Token {OILPRICE_API_KEY}'}
-    
     try:
         r = requests.get(url, headers=headers, params=params, timeout=15)
-        print(f"Status code: {r.status_code}")
-        print(f"Réponse brute: {r.text[:400]}")   # ← tu verras exactement ce que renvoie l’API
-        
         if r.status_code == 200:
             data = r.json()
-            if data.get("status") == "success" and "data" in data:
-                price = data["data"]["price"]
-                print(f"✅ Prix extrait : {price:.2f}")
-                return price
-            else:
-                print("❌ Format inattendu")
-        else:
-            print(f"❌ Erreur HTTP {r.status_code}")
-    except Exception as e:
-        print(f"❌ Exception prix : {e}")
-    
-    print("⚠️ Prix non récupéré → fallback à 0")
+            if data.get("status") == "success":
+                return data["data"]["price"]
+    except:
+        pass
     return None
-
-# (le reste du code est identique : check_buy_alert, get_rss_news, get_prediction, boucle while)
 
 def check_buy_alert(price):
     for level, data in BUY_LEVELS.items():
         if abs(price - level) <= 0.25:
             risk = round((level - data["sl"]) * data["lot"] * 100, 2)
-            return (f"🚨 **ALERTE BUY LIMIT** 🚨\n"
+            return (f"🚨 **ALERTE BUY LIMIT ICT** 🚨\n"
                     f"Prix actuel : **{price:.2f} USD**\n"
-                    f"✅ Niveau touché : **{level}**\n"
+                    f"✅ Niveau ICT touché : **{level}**\n"
                     f"Lot recommandé : {data['lot']}\n"
-                    f"Stop Loss : **{data['sl']}** (-{risk}$ risque)\n"
+                    f"Stop Loss : **{data['sl']}** (risque -{risk}$)\n"
                     f"Take Profit : **{data['tp']}**\n\n"
                     f"Place ton Buy Limit maintenant !")
     return None
@@ -105,6 +88,7 @@ while True:
         
         if price:
             send_message(f"📊 Prix OIL WTI : **{price:.2f} USD / baril**\n🕒 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
+            
             alert = check_buy_alert(price)
             if alert:
                 send_message(alert)
@@ -113,6 +97,6 @@ while True:
         send_message(get_prediction())
 
     except Exception as e:
-        print(f"Erreur globale : {e}")
+        print(f"Erreur : {e}")
 
     time.sleep(900)
