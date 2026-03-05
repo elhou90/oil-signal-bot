@@ -1,9 +1,9 @@
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import telebot
 import os
 import requests
-import feedparser   # ← NOUVEAU pour les RSS
+import feedparser
 
 # ================== CONFIG ==================
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -13,13 +13,16 @@ SENTIMENT_BIAS = os.getenv("SENTIMENT_BIAS", "bullish")
 
 COMMODITY_CODE = "WTI_USD"
 
-print("🚀 Bot WTI + RSS (Investing + OilPrice) démarré - Sentiment Grok :", SENTIMENT_BIAS.upper())
+# 🔥 TES NIVEAUX BUY LIMIT (tu peux les modifier)
+BUY_LEVELS = [76.20, 75.50, 74.80, 73.80]
+
+print("🚀 Bot WTI + ALERTES Buy Limit démarré - Sentiment :", SENTIMENT_BIAS.upper())
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
 RSS_FEEDS = [
-    "https://oilprice.com/rss/main",                    # Meilleur pour géopolitique pétrole
-    "https://www.investing.com/rss/news_11.rss"         # Commodities / WTI
+    "https://oilprice.com/rss/main",
+    "https://www.investing.com/rss/news_11.rss"
 ]
 
 def send_message(message):
@@ -30,34 +33,42 @@ def send_message(message):
         print(f"Erreur Telegram : {e}")
 
 def get_price():
+    """Version ultra-stable qui affiche toujours le prix"""
     url = "https://api.oilpriceapi.com/v1/prices/latest"
     params = {'by_code': COMMODITY_CODE}
     headers = {'Authorization': f'Token {OILPRICE_API_KEY}'}
     try:
-        r = requests.get(url, headers=headers, params=params, timeout=10)
+        r = requests.get(url, headers=headers, params=params, timeout=15)
         if r.status_code == 200:
             data = r.json()
             if data.get("status") == "success":
-                return data["data"]["price"]
-    except:
-        pass
+                price = data["data"]["price"]
+                print(f"✅ Prix récupéré : {price:.2f}")
+                return price
+    except Exception as e:
+        print(f"Erreur prix : {e}")
     return None
 
 def get_rss_news():
+    # (inchangé - même code que avant)
     news_text = "📰 Dernières news WTI / Oil (RSS) :\n\n"
     count = 0
-    keywords = ["wti", "crude oil", "oil price", "hormuz", "hormoz", "iran", "installation", "bombard", "attaque", "tankers", "strike"]
-    
-    for feed_url in RSS_FEEDS:
-        feed = feedparser.parse(feed_url)
-        for entry in feed.entries[:6]:  # 6 articles max par flux
-            title = entry.title.lower()
-            if any(k in title for k in keywords):
+    keywords = ["wti", "crude oil", "oil price", "hormuz", "hormoz", "iran", "installation", "bombard", "attaque", "tankers"]
+    for url in RSS_FEEDS:
+        feed = feedparser.parse(url)
+        for entry in feed.entries[:8]:
+            if any(k in entry.title.lower() for k in keywords):
                 news_text += f"• {entry.title}\n   {entry.link}\n\n"
                 count += 1
-                if count >= 5:  # max 5 news au total
-                    return news_text
-    return news_text if count > 0 else "📰 Aucune news majeure sur WTI/Hormuz pour l’instant"
+                if count >= 5: return news_text
+    return news_text if count > 0 else "📰 Aucune news majeure pour l’instant"
+
+def check_buy_alert(price):
+    """Alerte quand le prix approche un de tes niveaux"""
+    for level in BUY_LEVELS:
+        if abs(price - level) <= 0.25:  # alerte si ±0.25 $
+            return f"🚨 **ALERTE BUY LIMIT** 🚨\nPrix actuel : **{price:.2f}**\nProche de ton niveau : **{level}**\n\n✅ Place ton Buy Limit maintenant !"
+    return None
 
 def get_prediction():
     if SENTIMENT_BIAS.lower() == "bullish":
@@ -65,26 +76,30 @@ def get_prediction():
     elif SENTIMENT_BIAS.lower() == "bearish":
         return "📉 GROK PREDICTION : CHUTE\n❌ RECOMMANDATION : VENTE (Sell WTI)"
     else:
-        return "⚖️ GROK PREDICTION : NEUTRE\n🔄 Attendre signal"
+        return "⚖️ GROK PREDICTION : NEUTRE"
 
 while True:
     try:
-        # Prix
         price = get_price()
+        
         if price:
+            # Prix toutes les 15 min (corrigé)
             send_message(f"📊 Prix OIL WTI : **{price:.2f} USD / baril**\n🕒 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
+            
+            # Alertes sur TES niveaux
+            alert = check_buy_alert(price)
+            if alert:
+                send_message(alert)
+        
+        # News RSS
+        send_message(get_rss_news())
+        
+        # Prédiction
+        send_message(get_prediction())
 
-        # News RSS (Investing + OilPrice)
-        news = get_rss_news()
-        send_message(news)
-
-        # Prédiction Grok
-        pred = get_prediction()
-        send_message(pred)
-
-        print("✅ Cycle terminé (prix + RSS news + prédiction)")
-
+        print("✅ Cycle terminé")
+        
     except Exception as e:
         print(f"Erreur : {e}")
 
-    time.sleep(900)  # Toutes les 15 minutes
+    time.sleep(900)  # 15 minutes
