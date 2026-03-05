@@ -13,10 +13,15 @@ SENTIMENT_BIAS = os.getenv("SENTIMENT_BIAS", "bullish")
 
 COMMODITY_CODE = "WTI_USD"
 
-# 🔥 TES NIVEAUX BUY LIMIT (tu peux les modifier)
-BUY_LEVELS = [76.20, 75.50, 74.80, 73.80]
+# TES NIVEAUX BUY LIMIT (modifie ici si tu veux)
+BUY_LEVELS = {
+    76.20: {"sl": 75.60, "tp": 79.50, "lot": 0.02},
+    75.50: {"sl": 74.80, "tp": 79.50, "lot": 0.02},
+    74.80: {"sl": 74.00, "tp": 79.50, "lot": 0.01},
+    73.80: {"sl": 73.00, "tp": 79.50, "lot": 0.01}
+}
 
-print("🚀 Bot WTI + ALERTES Buy Limit démarré - Sentiment :", SENTIMENT_BIAS.upper())
+print("🚀 Bot démarré - Debug prix activé")
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
@@ -28,29 +33,52 @@ RSS_FEEDS = [
 def send_message(message):
     try:
         bot.send_message(CHAT_ID, message)
-        print("✅ Message envoyé")
     except Exception as e:
         print(f"Erreur Telegram : {e}")
 
 def get_price():
-    """Version ultra-stable qui affiche toujours le prix"""
+    """Version avec debug complet"""
     url = "https://api.oilpriceapi.com/v1/prices/latest"
     params = {'by_code': COMMODITY_CODE}
     headers = {'Authorization': f'Token {OILPRICE_API_KEY}'}
+    
     try:
         r = requests.get(url, headers=headers, params=params, timeout=15)
+        print(f"Status code: {r.status_code}")
+        print(f"Réponse brute: {r.text[:400]}")   # ← tu verras exactement ce que renvoie l’API
+        
         if r.status_code == 200:
             data = r.json()
-            if data.get("status") == "success":
+            if data.get("status") == "success" and "data" in data:
                 price = data["data"]["price"]
-                print(f"✅ Prix récupéré : {price:.2f}")
+                print(f"✅ Prix extrait : {price:.2f}")
                 return price
+            else:
+                print("❌ Format inattendu")
+        else:
+            print(f"❌ Erreur HTTP {r.status_code}")
     except Exception as e:
-        print(f"Erreur prix : {e}")
+        print(f"❌ Exception prix : {e}")
+    
+    print("⚠️ Prix non récupéré → fallback à 0")
+    return None
+
+# (le reste du code est identique : check_buy_alert, get_rss_news, get_prediction, boucle while)
+
+def check_buy_alert(price):
+    for level, data in BUY_LEVELS.items():
+        if abs(price - level) <= 0.25:
+            risk = round((level - data["sl"]) * data["lot"] * 100, 2)
+            return (f"🚨 **ALERTE BUY LIMIT** 🚨\n"
+                    f"Prix actuel : **{price:.2f} USD**\n"
+                    f"✅ Niveau touché : **{level}**\n"
+                    f"Lot recommandé : {data['lot']}\n"
+                    f"Stop Loss : **{data['sl']}** (-{risk}$ risque)\n"
+                    f"Take Profit : **{data['tp']}**\n\n"
+                    f"Place ton Buy Limit maintenant !")
     return None
 
 def get_rss_news():
-    # (inchangé - même code que avant)
     news_text = "📰 Dernières news WTI / Oil (RSS) :\n\n"
     count = 0
     keywords = ["wti", "crude oil", "oil price", "hormuz", "hormoz", "iran", "installation", "bombard", "attaque", "tankers"]
@@ -62,13 +90,6 @@ def get_rss_news():
                 count += 1
                 if count >= 5: return news_text
     return news_text if count > 0 else "📰 Aucune news majeure pour l’instant"
-
-def check_buy_alert(price):
-    """Alerte quand le prix approche un de tes niveaux"""
-    for level in BUY_LEVELS:
-        if abs(price - level) <= 0.25:  # alerte si ±0.25 $
-            return f"🚨 **ALERTE BUY LIMIT** 🚨\nPrix actuel : **{price:.2f}**\nProche de ton niveau : **{level}**\n\n✅ Place ton Buy Limit maintenant !"
-    return None
 
 def get_prediction():
     if SENTIMENT_BIAS.lower() == "bullish":
@@ -83,23 +104,15 @@ while True:
         price = get_price()
         
         if price:
-            # Prix toutes les 15 min (corrigé)
             send_message(f"📊 Prix OIL WTI : **{price:.2f} USD / baril**\n🕒 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
-            
-            # Alertes sur TES niveaux
             alert = check_buy_alert(price)
             if alert:
                 send_message(alert)
         
-        # News RSS
         send_message(get_rss_news())
-        
-        # Prédiction
         send_message(get_prediction())
 
-        print("✅ Cycle terminé")
-        
     except Exception as e:
-        print(f"Erreur : {e}")
+        print(f"Erreur globale : {e}")
 
-    time.sleep(900)  # 15 minutes
+    time.sleep(900)
