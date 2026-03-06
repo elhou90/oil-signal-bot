@@ -13,19 +13,22 @@ SENTIMENT_BIAS = os.getenv("SENTIMENT_BIAS", "bullish")
 
 COMMODITY_CODE = "WTI_USD"
 
-# 🔥 NIVEAUX ICT EXACTS (modifie ici si tu veux changer)
+# 🔥 NOUVEAUX NIVEAUX ICT (5 mars 2026)
 BUY_LEVELS = {
-    76.20: {"sl": 75.50, "tp": 79.50, "lot": 0.02},
-    75.50: {"sl": 74.70, "tp": 79.50, "lot": 0.02},
-    74.80: {"sl": 74.00, "tp": 79.50, "lot": 0.01},
-    73.80: {"sl": 73.00, "tp": 79.50, "lot": 0.01}
+    83.10: {"sl": 82.50, "tp": 87.00, "lot": 0.02},
+    82.80: {"sl": 82.00, "tp": 87.00, "lot": 0.02},
+    81.50: {"sl": 80.80, "tp": 87.00, "lot": 0.02},
+    80.00: {"sl": 79.20, "tp": 87.00, "lot": 0.01}
 }
 
-print("🚀 Bot WTI + ALERTES ICT démarré - Sentiment :", SENTIMENT_BIAS.upper())
+print("🚀 Bot WTI + ALERTES ICT mises à jour démarré - Sentiment :", SENTIMENT_BIAS.upper())
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
-RSS_FEEDS = ["https://oilprice.com/rss/main", "https://www.investing.com/rss/news_11.rss"]
+RSS_FEEDS = [
+    "https://oilprice.com/rss/main",
+    "https://www.investing.com/rss/news_11.rss"
+]
 
 def send_message(message):
     try:
@@ -96,6 +99,8 @@ while True:
         send_message(get_rss_news())
         send_message(get_prediction())
 
+        print("✅ Cycle terminé")
+        
     except Exception as e:
         print(f"Erreur : {e}")
 
